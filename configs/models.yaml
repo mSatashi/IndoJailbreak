@@ -1,0 +1,110 @@
+# ==============================================================================
+# Model Configurations: Target LLMs and Judge Models
+# ==============================================================================
+
+# Target Models Under Evaluation
+targets:
+  # Open-weight models (via HuggingFace or Ollama)
+  llama3_8b:
+    name: "meta-llama/Meta-Llama-3-8B-Instruct"
+    provider: "huggingface"
+    device_map: "auto"
+    load_in_4bit: true          # Recommended for 4GB VRAM
+    max_new_tokens: 512
+    temperature: 0.7
+
+  qwen25_7b:
+    name: "Qwen/Qwen2.5-7B-Instruct"
+    provider: "huggingface"
+    device_map: "auto"
+    load_in_4bit: true
+    max_new_tokens: 512
+    temperature: 0.7
+
+  # Regional Southeast Asian Models
+  sealion_7b:
+    name: "aisingapore/sea-lion-7b-instruct"
+    provider: "huggingface"
+    device_map: "auto"
+    load_in_4bit: true
+    max_new_tokens: 512
+    temperature: 0.7
+
+  # Cloud API Targets
+  gpt_4o_mini:
+    name: "gpt-4o-mini"
+    provider: "openai"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  gemini_flash:
+    name: "gemini-1.5-flash"
+    provider: "google"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  ollama_llama3:
+    name: "llama3:latest"
+    provider: "ollama"
+    endpoint: "http://localhost:11434/api/generate"
+    max_new_tokens: 512
+    temperature: 0.7
+  
+  ollama_gemma4e:
+    name: "gemma4:e4b"
+    provider: "ollama"
+    endpoint: "http://localhost:11434/api/generate"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  # Cloud / Remote Ollama Instance (e.g. RunPod, AWS, Ngrok, Cloudflare Tunnel)
+  ollama_cloud:
+    name: "nemotron-3-nano:30b-cloud"
+    provider: "ollama"
+    endpoint: "http://localhost:11434/api/generate"    # Override with your cloud URL or OLLAMA_ENDPOINT
+    max_new_tokens: 512
+    temperature: 0.7
+
+  # OpenRouter API Targets (https://openrouter.ai)
+  openrouter_llama33_70b:
+    name: "meta-llama/llama-3.3-70b-instruct"
+    provider: "openrouter"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  openrouter_qwen25_72b:
+    name: "qwen/qwen-2.5-72b-instruct"
+    provider: "openrouter"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  openrouter_deepseek:
+    name: "deepseek/deepseek-chat"
+    provider: "openrouter"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  openrouter_gemini_flash:
+    name: "google/gemini-2.0-flash-001"
+    provider: "openrouter"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  openrouter_nemotron:
+    name: "nvidia/nemotron-3.5-lightning:free"
+    provider: "openrouter"
+    max_new_tokens: 512
+    temperature: 0.7
+    exclude_reasoning: true
+
+# Judge Models (for Dual-Dimensional Scoring)
+judges:
+  harmfulness_judge:
+    name: "gpt-4o-mini"         # Cost-effective, consistent judge
+    provider: "openai"
+    temperature: 0.0
+    max_tokens: 256
+
+  embedding_evaluator:
+    name: "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
+    device: "cuda"
