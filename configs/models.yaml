@@ -23,7 +23,7 @@ targets:
 
   # Regional Southeast Asian Models
   sealion_7b:
-    name: "aisingapore/sea-lion-7b-instruct"
+    name: "aisingapore/SEA-LION-v1-7B-IT"
     provider: "huggingface"
     device_map: "auto"
     load_in_4bit: true
