@@ -58,10 +58,25 @@ targets:
     temperature: 0.7
 
   # Cloud / Remote Ollama Instance (e.g. RunPod, AWS, Ngrok, Cloudflare Tunnel)
-  ollama_cloud:
+  ollama_deepseek_cloud:
+    name: "deepseek-v4.1-flash:cloud"
+    provider: "ollama"
+    endpoint: "https://ollama.com/api/generate"    # Cloud URL
+    max_new_tokens: 1024
+    temperature: 0.7
+    think: false                # reasoning tokens otherwise exhaust max_new_tokens -> empty response
+
+  ollama_nemotron_cloud:
     name: "nemotron-3-nano:30b-cloud"
     provider: "ollama"
-    endpoint: "http://localhost:11434/api/generate"    # Override with your cloud URL or OLLAMA_ENDPOINT
+    endpoint: "https://ollama.com/api/generate"
+    max_new_tokens: 512
+    temperature: 0.7
+
+  ollama_gemma_cloud:
+    name: "gemma4:31b-cloud"
+    provider: "ollama"
+    endpoint: "https://ollama.com/api/generate"    # Override with your cloud URL or OLLAMA_ENDPOINT
     max_new_tokens: 512
     temperature: 0.7
 

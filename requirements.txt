@@ -3,6 +3,7 @@
 transformers>=4.48.0
 sentence-transformers>=3.4.0
 accelerate>=1.3.0
+bitsandbytes>=0.43.0
 scikit-learn>=1.6.0
 
 # Data Processing & Utilities

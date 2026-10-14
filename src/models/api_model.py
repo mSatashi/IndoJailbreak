@@ -94,6 +94,7 @@ class GeminiTargetLLM(BaseTargetLLM):
                 self._sdk_type = "genai"
             except Exception:
                 try:
+                    # pyrefly: ignore [missing-import]
                     import google.generativeai as gai
                     gai.configure(api_key=self.api_key)
                     self.client = gai.GenerativeModel(self.model_name)

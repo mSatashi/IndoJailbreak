@@ -96,3 +96,12 @@ python scripts/run_attack.py --target-model openrouter_llama33_70b --num-samples
 ### 3. Generated Adversarial Benchmark Dataset
 All experiments automatically export the resulting adversarial dataset to:
 `results/datasets/indojailbreak_adversarial_bench.json`
+
+### 4. Baseline Jailbreak Algorithms (comparison against IndoJailbreak)
+`scripts/run_jailbreak_baselines.py` runs **AutoDAN, GPTFuzzer, PAIR, TAP, ForgeDAN** (implementations in `scripts/jailbreak_baselines/`)
+on the same IndoSafety samples, same judge and same per-goal target-query budget.
+```powershell
+python scripts/run_jailbreak_baselines.py --method all --target-model mock --num-samples-per-category 1 --fast-eval
+python scripts/run_jailbreak_baselines.py --method pair,tap --target-model ollama_gemma_cloud --dataset eval2 --dialect formal --num-samples-per-category 10 --max-queries 100
+```
+Outputs go to `results/runs/<timestamp>_baselines_<target>/` (`<method>_results.json`, `<method>.jsonl`, `summary.json`).

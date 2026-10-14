@@ -55,7 +55,9 @@ def parse_arguments():
     parser.add_argument("--output-dir", type=str, default="results/runs", help="Base directory for run artifacts")
     parser.add_argument("--dataset-output", type=str, default="results/datasets/indojailbreak_adversarial_bench.json", help="Path to save exported adversarial benchmark dataset")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--judge-mode", type=str, choices=["heuristic", "llm"], default="heuristic", help="Safety judge mode")
+    parser.add_argument("--judge-mode", type=str, choices=["heuristic", "llm", "ollama"], default="heuristic", help="Safety judge mode: 'heuristic' (fast, local), 'llm' (OpenAI/OpenRouter API), 'ollama' (local Ollama server)")
+    parser.add_argument("--ollama-model", type=str, default="llama3.1", help="Ollama model name to use as judge (e.g. llama3.1, mistral, gemma2)")
+    parser.add_argument("--ollama-url", type=str, default="http://localhost:11434/v1", help="Ollama OpenAI-compatible API base URL")
     parser.add_argument("--fast-eval", action="store_true", help="Use lightweight semantic similarity for high-speed runs")
     return parser.parse_args()
 
@@ -90,7 +92,7 @@ def main():
 
     if args.dataset == "eval2":
         raw_eval2 = loader.load_parallel_dataset()
-        if args.risk_area:
+        if args.risk_area and args.risk_area.lower() != "all":
             raw_eval2 = loader.get_prompts_by_risk_area(raw_eval2, args.risk_area)
 
         if args.dialect == "all":
@@ -102,12 +104,33 @@ def main():
                 selected_items.extend(loader.sample_prompts(d_items, n=sample_count, seed=args.seed))
         else:
             d_items = loader.get_prompts_by_dialect(raw_eval2, dialect=args.dialect)
-            selected_items = loader.sample_prompts(d_items, n=args.num_samples, seed=args.seed)
+            if args.risk_area and args.risk_area.lower() == "all":
+                from collections import defaultdict
+                cats = sorted(list(set(item["risk_area"] for item in d_items)))
+                cat_map = defaultdict(list)
+                for item in d_items:
+                    cat_map[item["risk_area"]].append(item)
+                for cat in cats:
+                    selected_items.extend(loader.sample_prompts(cat_map[cat], n=args.num_samples, seed=args.seed))
+            else:
+                selected_items = loader.sample_prompts(d_items, n=args.num_samples, seed=args.seed)
     else:
         raw_eval1 = loader.load_localized_dataset()
-        if args.risk_area:
+        if args.risk_area and args.risk_area.lower() != "all":
             raw_eval1 = loader.get_prompts_by_risk_area(raw_eval1, args.risk_area)
-        sampled_records = loader.sample_prompts(raw_eval1, n=args.num_samples, seed=args.seed)
+            sampled_records = loader.sample_prompts(raw_eval1, n=args.num_samples, seed=args.seed)
+        elif args.risk_area and args.risk_area.lower() == "all":
+            from collections import defaultdict
+            cats = sorted(list(set(r["data"]["risk_area"] for r in raw_eval1)))
+            cat_map = defaultdict(list)
+            for r in raw_eval1:
+                cat_map[r["data"]["risk_area"]].append(r)
+            sampled_records = []
+            for cat in cats:
+                sampled_records.extend(loader.sample_prompts(cat_map[cat], n=args.num_samples, seed=args.seed))
+        else:
+            sampled_records = loader.sample_prompts(raw_eval1, n=args.num_samples, seed=args.seed)
+
         for r in sampled_records:
             d = r.get("data", {})
             selected_items.append({
@@ -141,7 +164,9 @@ def main():
 
     judge = DualDimensionalJudge(
         judge_mode=args.judge_mode,
-        harmfulness_threshold=cfg.get("judge", {}).get("harmfulness_threshold", 4.0)
+        harmfulness_threshold=cfg.get("judge", {}).get("harmfulness_threshold", 4.0),
+        ollama_model=args.ollama_model,
+        ollama_base_url=args.ollama_url
     )
 
     if args.fast_eval:

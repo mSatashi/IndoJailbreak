@@ -70,8 +70,22 @@ def get_target_model(
     targets = configs.get("targets", {})
 
     if model_key not in targets:
-        available = list(targets.keys()) + ["mock"]
-        raise ValueError(f"Unknown target model '{model_key}'. Available options: {available}")
+        # Check by model name or aliases
+        matched_key = None
+        for k, v in targets.items():
+            if v.get("name", "").lower() == model_key.lower():
+                matched_key = k
+                break
+        if not matched_key:
+            if "nemotron" in model_key.lower():
+                matched_key = "ollama_nemotron_cloud"
+            elif "gemma" in model_key.lower():
+                matched_key = "ollama_gemma_cloud"
+        if matched_key and matched_key in targets:
+            model_key = matched_key
+        else:
+            available = list(targets.keys()) + ["mock"]
+            raise ValueError(f"Unknown target model '{model_key}'. Available options: {available}")
 
     cfg = targets[model_key]
     provider = cfg.get("provider", "").lower()
@@ -95,7 +109,8 @@ def get_target_model(
             headers=kwargs.get("headers") or cfg.get("headers"),
             max_new_tokens=max_new_tokens,
             temperature=temperature,
-            exclude_reasoning=cfg.get("exclude_reasoning", True)
+            exclude_reasoning=cfg.get("exclude_reasoning", True),
+            think=cfg.get("think")
         )
     elif provider == "openai":
         return OpenAITargetLLM(

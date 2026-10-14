@@ -4,6 +4,7 @@ Supports 4-bit quantization (BitsAndBytes) and automatic chat template applicati
 for Meta-Llama-3-8B-Instruct, Qwen2.5-7B-Instruct, SEA-LION-7B, etc.
 """
 
+import os
 from typing import List, Dict, Any, Optional
 from src.models.base_model import BaseTargetLLM
 
@@ -40,8 +41,14 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         import torch
         from transformers import AutoTokenizer, AutoModelForCausalLM
 
+        token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+
         print(f"Loading HuggingFace model '{self.model_name}' (load_in_4bit={self.load_in_4bit})...")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.model_name,
+            trust_remote_code=True,
+            token=token
+        )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -49,6 +56,8 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
             "trust_remote_code": True,
             "device_map": self.device_map,
         }
+        if token:
+            model_kwargs["token"] = token
 
         if self.load_in_4bit and torch.cuda.is_available():
             try:

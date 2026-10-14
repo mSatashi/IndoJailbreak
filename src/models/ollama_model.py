@@ -18,7 +18,8 @@ class OllamaTargetLLM(BaseTargetLLM):
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         timeout: int = 90,
-        exclude_reasoning: bool = True
+        exclude_reasoning: bool = True,
+        think: Optional[bool] = None
     ):
         super().__init__(
             model_name=model_name,
@@ -39,6 +40,7 @@ class OllamaTargetLLM(BaseTargetLLM):
         self.custom_headers = headers or {}
         self.timeout = timeout
         self.exclude_reasoning = exclude_reasoning
+        self.think = think  # None = server default; False disables hidden reasoning tokens
 
     def is_available(self) -> bool:
         """Check if Ollama service is reachable."""
@@ -62,6 +64,8 @@ class OllamaTargetLLM(BaseTargetLLM):
                 "temperature": kwargs.get("temperature", self.temperature)
             }
         }
+        if self.think is not None:
+            payload["think"] = self.think
         data = json.dumps(payload).encode("utf-8")
 
         req_headers = {"Content-Type": "application/json"}
