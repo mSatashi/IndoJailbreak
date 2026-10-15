@@ -103,6 +103,7 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
 
         formatted = self._format_prompt(prompt)
         inputs = self.tokenizer(formatted, return_tensors="pt")
+        inputs.pop("token_type_ids", None)
         inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
         max_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
