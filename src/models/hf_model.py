@@ -113,6 +113,7 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
             "max_new_tokens": max_tokens,
             "pad_token_id": self.tokenizer.pad_token_id,
             "eos_token_id": self.tokenizer.eos_token_id,
+            "repetition_penalty": kwargs.get("repetition_penalty", 1.1),
         }
         if temp > 0.0:
             gen_kwargs["do_sample"] = True
