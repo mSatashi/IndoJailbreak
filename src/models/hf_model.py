@@ -5,6 +5,10 @@ for Meta-Llama-3-8B-Instruct, Qwen2.5-7B-Instruct, SEA-LION-7B, etc.
 """
 
 import os
+import sys
+# Prevent broken system torchvision on clusters from crashing transformers imports
+sys.modules.setdefault("torchvision", None)
+
 from typing import List, Dict, Any, Optional
 from src.models.base_model import BaseTargetLLM
 
