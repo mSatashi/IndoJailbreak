@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 Semantic similarity evaluators for Indonesian LLM jailbreaks.
 Supports IndoNLP's Cendol model family (e.g., indonlp/cendol-mt5-base-inst)
@@ -6,8 +7,12 @@ as well as Sentence-Transformers for semantic preservation and fitness scoring.
 
 from abc import ABC, abstractmethod
 from typing import List, Union, Optional
-import torch
-import torch.nn.functional as F
+try:
+    import torch
+    import torch.nn.functional as F
+except ImportError:
+    torch = None
+    F = None
 
 class BaseSemanticEvaluator(ABC):
     """Abstract interface for semantic similarity evaluation."""

@@ -8,7 +8,10 @@ Inspired by findings in the IndoSafety benchmark (EMNLP 2025).
 import random
 import re
 from typing import Dict, List, Optional, Tuple, Any
-import torch
+try:
+    import torch
+except ImportError:
+    torch = None
 from src.mutators.base_mutator import BaseMutator, MutationResult
 
 # ==============================================================================

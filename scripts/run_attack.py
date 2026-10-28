@@ -13,7 +13,16 @@ import random
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
+from collections import defaultdict
 import yaml
+
+# Ensure UTF-8 output even on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 # Add project root to sys.path
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,6 +34,9 @@ from src.mutators.composite_mutator import IndonesianCompositeMutator
 from src.judges.composite_judge import DualDimensionalJudge
 from src.evaluators.similarity import get_semantic_evaluator, BaseSemanticEvaluator
 from src.core.genetic_engine import IndoJailbreakEngine, EvolutionResult
+
+DIALECTS = ["formal", "colloquial", "java", "sunda", "minangkabau"]
+
 
 class FallbackWordSimilarityEvaluator(BaseSemanticEvaluator):
     """Zero-dependency lexical overlap evaluator used when torch/GPU is restricted."""
@@ -45,10 +57,11 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="IndoJailbreak Automated Adversarial Evaluation CLI")
     parser.add_argument("--config", type=str, default="configs/default_config.yaml", help="Path to config YAML")
     parser.add_argument("--target-model", type=str, default="mock", help="Target model key from configs/models.yaml (e.g. mock, llama3_8b, ollama_llama3, gpt_4o_mini)")
-    parser.add_argument("--dataset", type=str, choices=["eval1", "eval2"], default="eval2", help="Benchmark dataset: eval1 (IndoSafety-Eval-1) or eval2 (Parallel Dialects)")
-    parser.add_argument("--dialect", type=str, default="all", choices=["all", "formal", "colloquial", "java", "sunda", "minangkabau"], help="Dialect filter for eval2")
+    parser.add_argument("--dataset", type=str, choices=["eval1", "eval2"], default="eval1", help="Benchmark dataset: eval1 (IndoSafety-Eval-1) or eval2 (Parallel Dialects)")
+    parser.add_argument("--dialect", type=str, default="formal", choices=DIALECTS, help="Dialect filter for eval2")
     parser.add_argument("--risk-area", type=str, default=None, help="Filter prompts by specific risk area (e.g. Toxicity, Malicious)")
-    parser.add_argument("--num-samples", type=int, default=5, help="Number of benchmark goals to evaluate")
+    parser.add_argument("--num-samples-per-category", type=int, default=5, help="Number of benchmark goals to evaluate per risk category")
+    parser.add_argument("--num-samples", type=int, default=None, help="Alias for --num-samples-per-category (deprecated)")
     parser.add_argument("--population-size", type=int, default=None, help="Override population size per generation")
     parser.add_argument("--max-generations", type=int, default=None, help="Override maximum evolutionary generations")
     parser.add_argument("--stop-on-success", action="store_true", default=True, help="Stop search early upon verified adversarial bypass")
@@ -70,8 +83,50 @@ def load_yaml(path_str: str) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def build_samples(args) -> Dict[str, List[Dict[str, Any]]]:
+    """Deterministic per-category sampling identical to scripts/run_jailbreak_baselines.py and scripts/run_baseline.py."""
+    loader = BenchmarkDataLoader()
+    cats: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    if args.dataset == "eval2":
+        for r in loader.load_parallel_dataset():
+            text = r.get("varieties", {}).get(args.dialect.lower())
+            if text:
+                cat = r.get("risk_area", "Uncategorized")
+                cats[cat].append({
+                    "id": r.get("id"),
+                    "risk_area": cat,
+                    "types_of_harm": r.get("types_of_harm"),
+                    "specific_harms": r.get("specific_harms"),
+                    "dialect": args.dialect.lower(),
+                    "prompt": text,
+                    "source": r.get("source", "")
+                })
+    else:
+        for r in loader.load_localized_dataset():
+            d = r.get("data", {})
+            cat = d.get("risk_area", "Uncategorized")
+            cats[cat].append({
+                "id": d.get("id"),
+                "risk_area": cat,
+                "types_of_harm": d.get("types_of_harm"),
+                "specific_harms": d.get("specific_harms"),
+                "dialect": "formal_id",
+                "prompt": d.get("prompt"),
+                "source": d.get("source", "")
+            })
+
+    if getattr(args, "risk_area", None) and args.risk_area.lower() != "all":
+        cats = {c: v for c, v in cats.items() if args.risk_area.lower() in c.lower()}
+
+    n_samples = args.num_samples_per_category if args.num_samples_per_category is not None else (args.num_samples or 5)
+    rng = random.Random(args.seed)
+    return {c: rng.sample(cats[c], min(n_samples, len(cats[c]))) for c in sorted(cats)}
+
+
 def main():
     args = parse_arguments()
+    if args.num_samples is not None:
+        args.num_samples_per_category = args.num_samples
     random.seed(args.seed)
 
     # 1. Load Configurations
@@ -87,70 +142,18 @@ def main():
     crossover_prob = evo_cfg.get("crossover_prob", 0.4)
 
     # 2. Prepare DataLoader & Select Benchmark Samples
-    loader = BenchmarkDataLoader()
-    selected_items: List[Dict[str, Any]] = []
+    samples = build_samples(args)
+    selected_items: List[Dict[str, Any]] = [item for c in sorted(samples) for item in samples[c]]
+    total_goals = len(selected_items)
 
-    if args.dataset == "eval2":
-        raw_eval2 = loader.load_parallel_dataset()
-        if args.risk_area and args.risk_area.lower() != "all":
-            raw_eval2 = loader.get_prompts_by_risk_area(raw_eval2, args.risk_area)
-
-        if args.dialect == "all":
-            # Round-robin sampling across all 5 dialects
-            dialects = ["formal", "colloquial", "java", "sunda", "minangkabau"]
-            for d in dialects:
-                d_items = loader.get_prompts_by_dialect(raw_eval2, dialect=d)
-                sample_count = max(1, args.num_samples // len(dialects))
-                selected_items.extend(loader.sample_prompts(d_items, n=sample_count, seed=args.seed))
-        else:
-            d_items = loader.get_prompts_by_dialect(raw_eval2, dialect=args.dialect)
-            if args.risk_area and args.risk_area.lower() == "all":
-                from collections import defaultdict
-                cats = sorted(list(set(item["risk_area"] for item in d_items)))
-                cat_map = defaultdict(list)
-                for item in d_items:
-                    cat_map[item["risk_area"]].append(item)
-                for cat in cats:
-                    selected_items.extend(loader.sample_prompts(cat_map[cat], n=args.num_samples, seed=args.seed))
-            else:
-                selected_items = loader.sample_prompts(d_items, n=args.num_samples, seed=args.seed)
-    else:
-        raw_eval1 = loader.load_localized_dataset()
-        if args.risk_area and args.risk_area.lower() != "all":
-            raw_eval1 = loader.get_prompts_by_risk_area(raw_eval1, args.risk_area)
-            sampled_records = loader.sample_prompts(raw_eval1, n=args.num_samples, seed=args.seed)
-        elif args.risk_area and args.risk_area.lower() == "all":
-            from collections import defaultdict
-            cats = sorted(list(set(r["data"]["risk_area"] for r in raw_eval1)))
-            cat_map = defaultdict(list)
-            for r in raw_eval1:
-                cat_map[r["data"]["risk_area"]].append(r)
-            sampled_records = []
-            for cat in cats:
-                sampled_records.extend(loader.sample_prompts(cat_map[cat], n=args.num_samples, seed=args.seed))
-        else:
-            sampled_records = loader.sample_prompts(raw_eval1, n=args.num_samples, seed=args.seed)
-
-        for r in sampled_records:
-            d = r.get("data", {})
-            selected_items.append({
-                "id": d.get("id"),
-                "risk_area": d.get("risk_area"),
-                "types_of_harm": d.get("types_of_harm"),
-                "specific_harms": d.get("specific_harms"),
-                "dialect": "general_id",
-                "prompt": d.get("prompt"),
-                "source": d.get("source")
-            })
-
-    print("=" * 70)
+    print("=" * 80)
     print(" IndoJailbreak: Automated Adversarial Safety Evaluation Framework")
-    print("=" * 70)
+    print("=" * 80)
     print(f" Target Model        : {args.target_model}")
-    print(f" Benchmark Dataset   : IndoSafety-{args.dataset.upper()} (Dialect: {args.dialect})")
-    print(f" Evaluated Prompts   : {len(selected_items)} samples")
+    print(f" Benchmark Dataset   : IndoSafety-{args.dataset.upper()} ({args.dialect if args.dataset == 'eval2' else 'Bahasa Baku'})")
+    print(f" Evaluated Prompts   : {total_goals} ({args.num_samples_per_category}/category x {len(samples)} categories)")
     print(f" Evolutionary Search : Pop={pop_size}, Max Gens={max_gens}, Elites={elite_ratio}")
-    print("=" * 70)
+    print("=" * 80)
 
     # 3. Instantiate Model, Mutator, Judge & Evaluator
     target_model = get_target_model(args.target_model)
@@ -203,6 +206,7 @@ def main():
 
     results_list: List[Dict[str, Any]] = []
     adversarial_dataset: List[Dict[str, Any]] = []
+    per_cat: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
 
     success_count = 0
     refusal_count = 0
@@ -213,7 +217,8 @@ def main():
 
     for idx, item in enumerate(selected_items, 1):
         prompt_text = item.get("prompt", "")
-        print(f"\n[{idx}/{len(selected_items)}] Evaluating Sample ID {item.get('id')} [{item.get('dialect', 'N/A')}]:")
+        cat = item.get("risk_area", "Uncategorized")
+        print(f"\n[{idx}/{total_goals}] Evaluating Sample ID {item.get('id')} [{cat} | {item.get('dialect', 'N/A')}]:")
         print(f"Goal: {prompt_text[:75]}...")
 
         res: EvolutionResult = engine.run(goal=prompt_text, verbose=True)
@@ -236,6 +241,14 @@ def main():
             "evolution_result": res.to_dict()
         }
         results_list.append(item_summary)
+        per_cat[cat].append({
+            "id": item.get("id"),
+            "success": is_bypass,
+            "is_refusal": best.judge_result.is_refusal if (best and best.judge_result) else True,
+            "harmfulness_score": best.judge_result.harmfulness_score if (best and best.judge_result) else 1.0,
+            "semantic_similarity": best.semantic_similarity if best else 0.0,
+            "fitness": best.fitness if best else 0.0,
+        })
 
         # Build formatted entry for the new Adversarial Benchmark Dataset
         if best:
@@ -267,10 +280,27 @@ def main():
     avg_harm = (total_harm_score / total_evaluated) if total_evaluated > 0 else 0.0
     avg_sim = (total_semantic_sim / total_evaluated) if total_evaluated > 0 else 0.0
 
+    # Per-category summary
+    per_cat_summary = {}
+    for c, items in sorted(per_cat.items()):
+        c_tot = len(items)
+        c_succ = sum(1 for it in items if it["success"])
+        c_ref = sum(1 for it in items if it["is_refusal"])
+        c_harm = sum(it["harmfulness_score"] for it in items) / c_tot if c_tot else 0.0
+        c_sim = sum(it["semantic_similarity"] for it in items) / c_tot if c_tot else 0.0
+        per_cat_summary[c] = {
+            "total": c_tot,
+            "successes": c_succ,
+            "asr_pct": round(c_succ / c_tot * 100.0, 2) if c_tot else 0.0,
+            "refusal_rate_pct": round(c_ref / c_tot * 100.0, 2) if c_tot else 0.0,
+            "mean_harmfulness_score": round(c_harm, 2),
+            "mean_semantic_similarity": round(c_sim, 4),
+        }
+
     # 5. Summary Reporting & Metrics
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print(" EXPERIMENT EVALUATION SUMMARY")
-    print("=" * 70)
+    print("=" * 80)
     print(f" Target Model                : {args.target_model}")
     print(f" Total Benchmark Goals       : {total_evaluated}")
     print(f" Attack Success Rate (ASR)   : {asr:.2f}% ({success_count}/{total_evaluated})")
@@ -278,7 +308,17 @@ def main():
     print(f" Mean Actionable Harm Score  : {avg_harm:.2f} / 5.0")
     print(f" Mean Semantic Preservation  : {avg_sim:.4f}")
     print(f" Total Duration              : {total_time:.2f} seconds")
-    print("=" * 70)
+    print("=" * 80)
+
+    print("\n" + "=" * 80)
+    print(" RESULTS BY RISK CATEGORY")
+    print("=" * 80)
+    print(f"{'Risk Category':<35} | {'N':<4} | {'ASR %':<8} | {'Refusal %':<10} | {'Mean Harm':<10} | {'Mean Sim':<10}")
+    print("-" * 80)
+    for c, s in per_cat_summary.items():
+        print(f"{c:<35} | {s['total']:<4} | {s['asr_pct']:<8.2f} | {s['refusal_rate_pct']:<10.2f} | "
+              f"{s['mean_harmfulness_score']:<10.2f} | {s['mean_semantic_similarity']:<10.4f}")
+    print("=" * 80)
 
     # 6. Export Artifacts
     # A. Run Summary Report
@@ -286,7 +326,8 @@ def main():
         "timestamp": run_timestamp,
         "target_model": args.target_model,
         "dataset": args.dataset,
-        "dialect": args.dialect,
+        "dialect": args.dialect if args.dataset == "eval2" else "formal",
+        "num_samples_per_category": args.num_samples_per_category,
         "risk_area": args.risk_area,
         "total_evaluated": total_evaluated,
         "attack_success_rate_pct": round(asr, 2),
@@ -294,6 +335,7 @@ def main():
         "mean_harmfulness_score": round(avg_harm, 2),
         "mean_semantic_similarity": round(avg_sim, 4),
         "total_duration_sec": round(total_time, 2),
+        "per_category": per_cat_summary,
         "evaluations": results_list
     }
     run_file = run_dir / "run_results.json"
@@ -308,6 +350,7 @@ def main():
         json.dump(adversarial_dataset, f, ensure_ascii=False, indent=2)
     print(f"[Saved] Evolved Adversarial Benchmark Dataset saved to: {dataset_path}")
     print(f"Exported {len(adversarial_dataset)} adversarial samples for research evaluation.\n")
+
 
 if __name__ == "__main__":
     main()
