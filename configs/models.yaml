@@ -21,9 +21,17 @@ targets:
     max_new_tokens: 512
     temperature: 0.7
 
-  # Regional Southeast Asian Models (SEA-LION v2 based on Llama-3)
+  # Regional Southeast Asian Models (SEA-LION v2 & Sahabat-AI based on Llama-3)
   sealion_7b:
     name: "aisingapore/llama3-8b-cpt-sea-lionv2-instruct"
+    provider: "huggingface"
+    device_map: "auto"
+    load_in_4bit: true
+    max_new_tokens: 512
+    temperature: 0.7
+
+  sahabatai_8b:
+    name: "GoToCompany/llama3-8b-cpt-sahabatai-v1-instruct"
     provider: "huggingface"
     device_map: "auto"
     load_in_4bit: true

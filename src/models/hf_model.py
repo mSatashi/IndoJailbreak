@@ -1,7 +1,7 @@
 """
 Hugging Face open-weight Target LLM provider.
 Supports 4-bit quantization (BitsAndBytes) and automatic chat template application
-for Meta-Llama-3-8B-Instruct, Qwen2.5-7B-Instruct, SEA-LION-7B, etc.
+for Meta-Llama-3-8B-Instruct, Qwen2.5-7B-Instruct, SEA-LION-7B, Sahabat-AI, etc.
 """
 
 import os
@@ -22,7 +22,8 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         load_in_4bit: bool = True,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
-        torch_dtype: str = "float16"
+        torch_dtype: str = "float16",
+        attn_implementation: Optional[str] = None
     ):
         super().__init__(
             model_name=model_name,
@@ -33,6 +34,7 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         self.device_map = device_map
         self.load_in_4bit = load_in_4bit
         self.torch_dtype = torch_dtype
+        self.attn_implementation = attn_implementation
         self.tokenizer = None
         self.model = None
         self._is_loaded = False
@@ -62,6 +64,19 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         }
         if token:
             model_kwargs["token"] = token
+
+        # Disable FlashAttention SDPA on pre-Ampere GPUs (compute capability < 8.0, e.g. Tesla V100 / T4)
+        if torch.cuda.is_available():
+            major_cc, _ = torch.cuda.get_device_capability()
+            if major_cc < 8:
+                torch.backends.cuda.enable_flash_sdp(False)
+                torch.backends.cuda.enable_mem_efficient_sdp(True)
+                torch.backends.cuda.enable_math_sdp(True)
+                model_kwargs["attn_implementation"] = self.attn_implementation or "eager"
+            elif self.attn_implementation:
+                model_kwargs["attn_implementation"] = self.attn_implementation
+        elif self.attn_implementation:
+            model_kwargs["attn_implementation"] = self.attn_implementation
 
         if self.load_in_4bit and torch.cuda.is_available():
             try:
@@ -100,6 +115,11 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
     def generate(self, prompt: str, **kwargs) -> str:
         self._lazy_load()
         import torch
+
+        if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8:
+            torch.backends.cuda.enable_flash_sdp(False)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)
 
         formatted = self._format_prompt(prompt)
         inputs = self.tokenizer(formatted, return_tensors="pt")

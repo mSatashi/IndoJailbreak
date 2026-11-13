@@ -56,7 +56,7 @@ def get_target_model(
     Factory function to instantiate a Target LLM by key name.
     
     Args:
-        model_key: Key matching configs/models.yaml (e.g. 'llama3_8b', 'ollama_llama3', 'gpt_4o_mini', 'mock')
+        model_key: Key matching configs/models.yaml (e.g. 'llama3_8b', 'sahabatai_8b', 'ollama_llama3', 'gpt_4o_mini', 'mock')
         config_path: Path to custom models.yaml
         **kwargs: Overrides for model params
     """
@@ -77,7 +77,9 @@ def get_target_model(
                 matched_key = k
                 break
         if not matched_key:
-            if "nemotron" in model_key.lower():
+            if "sahabat" in model_key.lower():
+                matched_key = "sahabatai_8b"
+            elif "nemotron" in model_key.lower():
                 matched_key = "ollama_nemotron_cloud"
             elif "gemma" in model_key.lower():
                 matched_key = "ollama_gemma_cloud"
@@ -99,7 +101,8 @@ def get_target_model(
             device_map=cfg.get("device_map", "auto"),
             load_in_4bit=cfg.get("load_in_4bit", True),
             max_new_tokens=max_new_tokens,
-            temperature=temperature
+            temperature=temperature,
+            attn_implementation=kwargs.get("attn_implementation", cfg.get("attn_implementation"))
         )
     elif provider == "ollama":
         return OllamaTargetLLM(
