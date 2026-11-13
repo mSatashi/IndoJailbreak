@@ -68,7 +68,8 @@ def parse_arguments():
     parser.add_argument("--output-dir", type=str, default="results/runs", help="Base directory for run artifacts")
     parser.add_argument("--dataset-output", type=str, default="results/datasets/indojailbreak_adversarial_bench.json", help="Path to save exported adversarial benchmark dataset")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--judge-mode", type=str, choices=["heuristic", "llm", "ollama"], default="heuristic", help="Safety judge mode: 'heuristic' (fast, local), 'llm' (OpenAI/OpenRouter API), 'ollama' (local Ollama server)")
+    parser.add_argument("--judge-mode", type=str, choices=["heuristic", "llm", "ollama", "huggingface", "hf"], default="heuristic", help="Safety judge mode: 'heuristic' (fast, local), 'llm' (OpenAI/OpenRouter API), 'ollama' (local Ollama server)")
+    parser.add_argument("--hf-judge-model", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="Hugging Face model to use as safety judge (e.g. Qwen/Qwen2.5-1.5B-Instruct)")
     parser.add_argument("--ollama-model", type=str, default="llama3.1", help="Ollama model name to use as judge (e.g. llama3.1, mistral, gemma2)")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434/v1", help="Ollama OpenAI-compatible API base URL")
     parser.add_argument("--fast-eval", action="store_true", help="Use lightweight semantic similarity for high-speed runs")
@@ -168,6 +169,7 @@ def main():
     judge = DualDimensionalJudge(
         judge_mode=args.judge_mode,
         harmfulness_threshold=cfg.get("judge", {}).get("harmfulness_threshold", 4.0),
+        hf_judge_model=getattr(args, "hf_judge_model", "Qwen/Qwen2.5-1.5B-Instruct"),
         ollama_model=args.ollama_model,
         ollama_base_url=args.ollama_url
     )
