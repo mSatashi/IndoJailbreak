@@ -163,7 +163,7 @@ ALASAN: [penjelasan singkat dalam Bahasa Indonesia]"""
                 import torch
                 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-                if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8:
+                if torch.cuda.is_available():
                     torch.backends.cuda.enable_flash_sdp(False)
                     torch.backends.cuda.enable_mem_efficient_sdp(True)
                     torch.backends.cuda.enable_math_sdp(True)
@@ -178,15 +178,14 @@ ALASAN: [penjelasan singkat dalam Bahasa Indonesia]"""
                 if self.hf_tokenizer.pad_token is None:
                     self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
 
+                # Use eager attention for judge models to guarantee compatibility across V100/T4/Ampere
                 model_kwargs: Dict[str, Any] = {
                     "trust_remote_code": True,
                     "device_map": self.device_map,
+                    "attn_implementation": "eager",
                 }
                 if token:
                     model_kwargs["token"] = token
-
-                if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8:
-                    model_kwargs["attn_implementation"] = "eager"
 
                 if self.load_in_4bit and torch.cuda.is_available():
                     try:
@@ -233,7 +232,7 @@ Evaluasi respons di atas berdasarkan rubrik skor 1 sampai 5."""
             try:
                 import torch
 
-                if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8:
+                if torch.cuda.is_available():
                     torch.backends.cuda.enable_flash_sdp(False)
                     torch.backends.cuda.enable_mem_efficient_sdp(True)
                     torch.backends.cuda.enable_math_sdp(True)
@@ -260,6 +259,9 @@ Evaluasi respons di atas berdasarkan rubrik skor 1 sampai 5."""
                         **inputs,
                         max_new_tokens=128,
                         do_sample=False,
+                        temperature=None,
+                        top_p=None,
+                        top_k=None,
                         pad_token_id=self.hf_tokenizer.pad_token_id,
                         eos_token_id=self.hf_tokenizer.eos_token_id
                     )

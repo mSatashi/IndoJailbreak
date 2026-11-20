@@ -41,7 +41,8 @@ def parse_arguments():
     parser.add_argument("--dialect", type=str, default="formal", choices=["formal", "colloquial", "java", "sunda", "minangkabau"], help="Dialect for eval2")
     parser.add_argument("--num-samples-per-category", type=int, default=10, help="Number of benchmark goals to evaluate per risk category")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for sampling")
-    parser.add_argument("--judge-mode", type=str, choices=["heuristic", "llm", "ollama"], default="heuristic", help="Safety judge mode")
+    parser.add_argument("--judge-mode", type=str, choices=["heuristic", "llm", "ollama", "huggingface", "hf"], default="heuristic", help="Safety judge mode")
+    parser.add_argument("--hf-judge-model", type=str, default="Qwen/Qwen2.5-1.5B-Instruct", help="Hugging Face model for LLM judge")
     parser.add_argument("--ollama-model", type=str, default="llama3.1", help="Ollama model for LLM judge")
     parser.add_argument("--ollama-url", type=str, default="http://localhost:11434/v1", help="Ollama base URL for LLM judge")
     parser.add_argument("--output-dir", type=str, default="results/runs", help="Base directory for run artifacts")
@@ -151,6 +152,7 @@ def main():
     judge = DualDimensionalJudge(
         judge_mode=args.judge_mode,
         harmfulness_threshold=harmfulness_threshold,
+        hf_judge_model=getattr(args, "hf_judge_model", "Qwen/Qwen2.5-1.5B-Instruct"),
         ollama_model=args.ollama_model,
         ollama_base_url=args.ollama_url
     )
