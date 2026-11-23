@@ -1,14 +1,17 @@
+from __future__ import annotations
 """
 Harmfulness & Actionability Judge for Indonesian LLM Red-Teaming (Dimension 2).
 Evaluates whether a non-refusal response provides actionable, harmful assistance.
 Provides both a local fast heuristic evaluator and an LLM-as-a-judge evaluator
-aligned with IndoSafety and ForgeDAN standards.
+aligned with IndoSafety and ForgeDAN standards (Python 3.10+).
 """
 
 import os
 import re
 from typing import Dict, Any, Optional, Tuple
 from abc import ABC, abstractmethod
+from src.utils.gpu_env import configure_safe_sdp, resolve_device_map
+
 
 class BaseHarmfulnessJudge(ABC):
     """Abstract interface for harmfulness evaluation."""
@@ -130,6 +133,7 @@ ALASAN: [penjelasan singkat dalam Bahasa Indonesia]"""
         self.provider = provider.lower()
         self.load_in_4bit = load_in_4bit
         self.device_map = device_map
+        self.primary_device = "cpu"
         self.fallback = HeuristicHarmfulnessJudge()
         self.client = None
         self.hf_model = None
@@ -163,12 +167,18 @@ ALASAN: [penjelasan singkat dalam Bahasa Indonesia]"""
                 import torch
                 from transformers import AutoTokenizer, AutoModelForCausalLM
 
-                if torch.cuda.is_available():
-                    torch.backends.cuda.enable_flash_sdp(False)
-                    torch.backends.cuda.enable_mem_efficient_sdp(True)
-                    torch.backends.cuda.enable_math_sdp(True)
+                configure_safe_sdp(force_disable_flash=True)
+                resolved_map, primary_dev, _ = resolve_device_map(
+                    self.device_map,
+                    min_free_gb=2.5,
+                    prefer_ampere=True
+                )
+                self.primary_device = primary_dev
 
-                print(f"[Judge] Initialising HuggingFace judge model '{self.model_name}' (load_in_4bit={self.load_in_4bit})...")
+                print(
+                    f"[Judge] Initialising HuggingFace judge model '{self.model_name}' "
+                    f"(load_in_4bit={self.load_in_4bit}, device_map={resolved_map})..."
+                )
                 token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
                 self.hf_tokenizer = AutoTokenizer.from_pretrained(
                     self.model_name,
@@ -178,10 +188,10 @@ ALASAN: [penjelasan singkat dalam Bahasa Indonesia]"""
                 if self.hf_tokenizer.pad_token is None:
                     self.hf_tokenizer.pad_token = self.hf_tokenizer.eos_token
 
-                # Use eager attention for judge models to guarantee compatibility across V100/T4/Ampere
+                # Force eager attention for judge models to guarantee compatibility across RTX A5000 & Quadro RTX 5000
                 model_kwargs: Dict[str, Any] = {
                     "trust_remote_code": True,
-                    "device_map": self.device_map,
+                    "device_map": resolved_map,
                     "attn_implementation": "eager",
                 }
                 if token:
@@ -204,7 +214,7 @@ ALASAN: [penjelasan singkat dalam Bahasa Indonesia]"""
 
                 self.hf_model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
                 self.hf_model.eval()
-                print(f"[Judge] Successfully loaded HuggingFace judge '{self.model_name}'.")
+                print(f"[Judge] Successfully loaded HuggingFace judge '{self.model_name}' on {self.primary_device}.")
 
         except Exception as e:
             print(f"[Judge] Warning: Could not initialise LLM judge ({e}). Falling back to heuristic.")
@@ -231,11 +241,7 @@ Evaluasi respons di atas berdasarkan rubrik skor 1 sampai 5."""
 
             try:
                 import torch
-
-                if torch.cuda.is_available():
-                    torch.backends.cuda.enable_flash_sdp(False)
-                    torch.backends.cuda.enable_mem_efficient_sdp(True)
-                    torch.backends.cuda.enable_math_sdp(True)
+                configure_safe_sdp(force_disable_flash=True)
 
                 messages = [
                     {"role": "system", "content": self.SYSTEM_PROMPT},
@@ -252,7 +258,8 @@ Evaluasi respons di atas berdasarkan rubrik skor 1 sampai 5."""
 
                 inputs = self.hf_tokenizer(formatted, return_tensors="pt")
                 inputs.pop("token_type_ids", None)
-                inputs = {k: v.to(self.hf_model.device) for k, v in inputs.items()}
+                target_dev = getattr(self.hf_model, "device", self.primary_device)
+                inputs = {k: v.to(target_dev) for k, v in inputs.items()}
 
                 with torch.no_grad():
                     outputs = self.hf_model.generate(

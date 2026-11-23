@@ -32,6 +32,7 @@ from src.utils.data_loader import BenchmarkDataLoader
 from src.models.model_factory import get_target_model
 from src.mutators.composite_mutator import IndonesianCompositeMutator
 from src.judges.composite_judge import DualDimensionalJudge
+from src.utils.gpu_env import configure_safe_sdp, print_gpu_summary
 from src.evaluators.similarity import get_semantic_evaluator, BaseSemanticEvaluator
 from src.core.genetic_engine import IndoJailbreakEngine, EvolutionResult
 
@@ -129,6 +130,8 @@ def main():
     if args.num_samples is not None:
         args.num_samples_per_category = args.num_samples
     random.seed(args.seed)
+    configure_safe_sdp(force_disable_flash=True)
+    print_gpu_summary()
 
     # 1. Load Configurations
     cfg = load_yaml(args.config)

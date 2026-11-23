@@ -36,6 +36,7 @@ sys.path.insert(0, str(BASE_DIR / "scripts"))
 from src.utils.data_loader import BenchmarkDataLoader
 from src.models.model_factory import get_target_model
 from src.judges.composite_judge import DualDimensionalJudge
+from src.utils.gpu_env import configure_safe_sdp, print_gpu_summary
 from jailbreak_baselines import (ATTACKS, AttackJudge, AttackerLLM, BudgetedTarget, make_similarity_fn)
 
 DIALECTS = ["formal", "colloquial", "java", "sunda", "minangkabau"]
@@ -70,7 +71,8 @@ def parse_arguments():
     p.add_argument("--device", type=str, default=None)
     p.add_argument("--fast-eval", action="store_true", help="Lexical similarity instead of an embedding model (ForgeDAN)")
     # judge
-    p.add_argument("--judge-mode", choices=["heuristic", "llm", "ollama"], default="heuristic")
+    p.add_argument("--judge-mode", choices=["heuristic", "llm", "ollama", "huggingface", "hf"], default="heuristic")
+    p.add_argument("--hf-judge-model", type=str, default="Qwen/Qwen2.5-1.5B-Instruct")
     p.add_argument("--ollama-model", type=str, default="llama3.1")
     p.add_argument("--ollama-url", type=str, default="http://localhost:11434/v1")
     # io
@@ -169,8 +171,11 @@ def main():
     target_llm = get_target_model(args.target_model)
     attacker_llm = target_llm if not args.attacker_model or args.attacker_model == args.target_model \
         else get_target_model(args.attacker_model)
+    configure_safe_sdp(force_disable_flash=True)
+    print_gpu_summary()
     judge = AttackJudge(DualDimensionalJudge(
         judge_mode=args.judge_mode, harmfulness_threshold=threshold,
+        hf_judge_model=getattr(args, "hf_judge_model", "Qwen/Qwen2.5-1.5B-Instruct"),
         ollama_model=args.ollama_model, ollama_base_url=args.ollama_url))
     sim_fn = make_similarity_fn(fast=args.fast_eval, model_name=args.embedding_model, device=args.device) \
         if "forgedan" in methods else None
@@ -212,6 +217,12 @@ def main():
                 per_cat[cat].append(r)
                 with open(ckpt, "a", encoding="utf-8") as f:
                     f.write(json.dumps(r, ensure_ascii=False) + "\n")
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
                 print(f"    => {'SUCCESS' if r['success'] else 'FAILED '} | target queries: {r['target_queries']} | "
                       f"harm: {r['harmfulness_score']:.1f}/5 | {r['duration_sec']}s")
 

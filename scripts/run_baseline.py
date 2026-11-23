@@ -31,6 +31,7 @@ sys.path.insert(0, str(BASE_DIR))
 from src.utils.data_loader import BenchmarkDataLoader
 from src.models.model_factory import get_target_model
 from src.judges.composite_judge import DualDimensionalJudge
+from src.utils.gpu_env import configure_safe_sdp, print_gpu_summary
 
 
 def parse_arguments():
@@ -75,6 +76,8 @@ def generate_with_retry(model, prompt: str, max_retries: int = 3, retry_delay: f
 def main():
     args = parse_arguments()
     random.seed(args.seed)
+    configure_safe_sdp(force_disable_flash=True)
+    print_gpu_summary()
 
     # 1. Load Configurations
     cfg = load_yaml(args.config)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 """
-Semantic similarity evaluators for Indonesian LLM jailbreaks.
+Semantic similarity evaluators for Indonesian LLM jailbreaks (Python 3.10+).
 Supports IndoNLP's Cendol model family (e.g., indonlp/cendol-mt5-base-inst)
 as well as Sentence-Transformers for semantic preservation and fitness scoring.
 """
@@ -13,6 +13,17 @@ try:
 except ImportError:
     torch = None
     F = None
+
+from src.utils.gpu_env import select_best_gpu
+
+
+def _resolve_eval_device(device: Optional[str]) -> str:
+    if torch is None or not torch.cuda.is_available():
+        return "cpu"
+    if device in (None, "cuda", "auto"):
+        return select_best_gpu(min_free_gb=1.5, prefer_ampere=True)
+    return device
+
 
 class BaseSemanticEvaluator(ABC):
     """Abstract interface for semantic similarity evaluation."""
@@ -46,7 +57,7 @@ class CendolSemanticEvaluator(BaseSemanticEvaluator):
     ):
         self.model_name = model_name
         self.max_length = max_length
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = _resolve_eval_device(device)
         
         self.tokenizer = None
         self.model = None
@@ -59,6 +70,7 @@ class CendolSemanticEvaluator(BaseSemanticEvaluator):
 
         from transformers import AutoTokenizer, AutoModel
 
+        self.device = _resolve_eval_device(self.device)
         print(f"Loading Cendol model: {self.model_name} on {self.device}...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         
@@ -71,7 +83,7 @@ class CendolSemanticEvaluator(BaseSemanticEvaluator):
 
         self.model.eval()
         self._is_loaded = True
-        print(f"Cendol model {self.model_name} loaded successfully.")
+        print(f"Cendol model {self.model_name} loaded successfully on {self.device}.")
 
     def _mean_pooling(self, token_embeddings: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         """Attention-mask weighted mean pooling."""
@@ -138,14 +150,15 @@ class SentenceTransformerEvaluator(BaseSemanticEvaluator):
         device: Optional[str] = None
     ):
         self.model_name = model_name
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = _resolve_eval_device(device)
         self.model = None
-        self._is_loaded = False
+        self. _is_loaded = False
 
     def _lazy_load(self):
         if self._is_loaded:
             return
         from sentence_transformers import SentenceTransformer
+        self.device = _resolve_eval_device(self.device)
         print(f"Loading SentenceTransformer: {self.model_name} on {self.device}...")
         self.model = SentenceTransformer(self.model_name, device=self.device)
         self._is_loaded = True

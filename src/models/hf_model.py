@@ -1,7 +1,9 @@
+from __future__ import annotations
 """
-Hugging Face open-weight Target LLM provider.
-Supports 4-bit quantization (BitsAndBytes) and automatic chat template application
-for Meta-Llama-3-8B-Instruct, Qwen2.5-7B-Instruct, SEA-LION-7B, Sahabat-AI, etc.
+Hugging Face open-weight Target LLM provider (Python 3.10+).
+Supports 4-bit quantization (BitsAndBytes), automatic chat template application,
+and intelligent GPU placement for heterogeneous multi-GPU servers
+(e.g., 2x NVIDIA RTX A5000 24GB Ampere + 2x Quadro RTX 5000 16GB Turing).
 """
 
 import os
@@ -9,16 +11,18 @@ import sys
 # Prevent broken system torchvision on clusters from crashing transformers imports
 sys.modules.setdefault("torchvision", None)
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from src.models.base_model import BaseTargetLLM
+from src.utils.gpu_env import configure_safe_sdp, resolve_device_map
+
 
 class HuggingFaceTargetLLM(BaseTargetLLM):
-    """Local HuggingFace model runner with 4-bit quantization and chat templating."""
+    """Local HuggingFace model runner with 4-bit quantization, smart GPU selection, and chat templating."""
 
     def __init__(
         self,
         model_name: str,
-        device_map: str = "auto",
+        device_map: Union[str, Dict[str, Any]] = "auto",
         load_in_4bit: bool = True,
         max_new_tokens: int = 512,
         temperature: float = 0.7,
@@ -37,19 +41,31 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         self.attn_implementation = attn_implementation
         self.tokenizer = None
         self.model = None
+        self.primary_device: str = "cpu"
         self._is_loaded = False
 
     def _lazy_load(self):
-        """Loads weights and tokenizer on first generation call."""
+        """Loads weights and tokenizer on first generation call, pinning to the best RTX A5000 GPU."""
         if self._is_loaded:
             return
 
         import torch
         from transformers import AutoTokenizer, AutoModelForCausalLM
 
+        configure_safe_sdp(force_disable_flash=True)
         token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_HUB_TOKEN")
 
-        print(f"Loading HuggingFace model '{self.model_name}' (load_in_4bit={self.load_in_4bit})...")
+        resolved_map, primary_dev, rec_attn = resolve_device_map(
+            self.device_map,
+            min_free_gb=6.0,
+            prefer_ampere=True
+        )
+        self.primary_device = primary_dev
+
+        print(
+            f"Loading HuggingFace model '{self.model_name}' "
+            f"(load_in_4bit={self.load_in_4bit}, device_map={resolved_map})..."
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
             trust_remote_code=True,
@@ -60,23 +76,11 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
 
         model_kwargs: Dict[str, Any] = {
             "trust_remote_code": True,
-            "device_map": self.device_map,
+            "device_map": resolved_map,
+            "attn_implementation": self.attn_implementation or rec_attn,
         }
         if token:
             model_kwargs["token"] = token
-
-        # Disable FlashAttention SDPA on pre-Ampere GPUs (compute capability < 8.0, e.g. Tesla V100 / T4)
-        if torch.cuda.is_available():
-            major_cc, _ = torch.cuda.get_device_capability()
-            if major_cc < 8:
-                torch.backends.cuda.enable_flash_sdp(False)
-                torch.backends.cuda.enable_mem_efficient_sdp(True)
-                torch.backends.cuda.enable_math_sdp(True)
-                model_kwargs["attn_implementation"] = self.attn_implementation or "eager"
-            elif self.attn_implementation:
-                model_kwargs["attn_implementation"] = self.attn_implementation
-        elif self.attn_implementation:
-            model_kwargs["attn_implementation"] = self.attn_implementation
 
         if self.load_in_4bit and torch.cuda.is_available():
             try:
@@ -96,7 +100,7 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
         self.model.eval()
         self._is_loaded = True
-        print(f"Successfully loaded '{self.model_name}'.")
+        print(f"Successfully loaded '{self.model_name}' on {self.primary_device}.")
 
     def _format_prompt(self, prompt: str) -> str:
         """Applies chat template if supported by tokenizer, otherwise returns raw prompt."""
@@ -116,15 +120,13 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         self._lazy_load()
         import torch
 
-        if torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8:
-            torch.backends.cuda.enable_flash_sdp(False)
-            torch.backends.cuda.enable_mem_efficient_sdp(True)
-            torch.backends.cuda.enable_math_sdp(True)
+        configure_safe_sdp(force_disable_flash=True)
 
         formatted = self._format_prompt(prompt)
         inputs = self.tokenizer(formatted, return_tensors="pt")
         inputs.pop("token_type_ids", None)
-        inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
+        target_dev = getattr(self.model, "device", self.primary_device)
+        inputs = {k: v.to(target_dev) for k, v in inputs.items()}
 
         max_tokens = kwargs.get("max_new_tokens", self.max_new_tokens)
         temp = kwargs.get("temperature", self.temperature)
@@ -141,6 +143,9 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
             gen_kwargs["top_p"] = kwargs.get("top_p", 0.9)
         else:
             gen_kwargs["do_sample"] = False
+            gen_kwargs["temperature"] = None
+            gen_kwargs["top_p"] = None
+            gen_kwargs["top_k"] = None
 
         with torch.no_grad():
             outputs = self.model.generate(**inputs, **gen_kwargs)
