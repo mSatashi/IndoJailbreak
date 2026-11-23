@@ -102,7 +102,8 @@ def get_target_model(
             load_in_4bit=cfg.get("load_in_4bit", True),
             max_new_tokens=max_new_tokens,
             temperature=temperature,
-            attn_implementation=kwargs.get("attn_implementation", cfg.get("attn_implementation"))
+            attn_implementation=kwargs.get("attn_implementation", cfg.get("attn_implementation")),
+            trust_remote_code=kwargs.get("trust_remote_code", cfg.get("trust_remote_code", False))
         )
     elif provider == "ollama":
         return OllamaTargetLLM(

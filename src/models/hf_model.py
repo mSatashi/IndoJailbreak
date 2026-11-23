@@ -27,7 +27,8 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         max_new_tokens: int = 512,
         temperature: float = 0.7,
         torch_dtype: str = "float16",
-        attn_implementation: Optional[str] = None
+        attn_implementation: Optional[str] = None,
+        trust_remote_code: bool = False
     ):
         super().__init__(
             model_name=model_name,
@@ -39,6 +40,7 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         self.load_in_4bit = load_in_4bit
         self.torch_dtype = torch_dtype
         self.attn_implementation = attn_implementation
+        self.trust_remote_code = trust_remote_code
         self.tokenizer = None
         self.model = None
         self.primary_device: str = "cpu"
@@ -68,14 +70,14 @@ class HuggingFaceTargetLLM(BaseTargetLLM):
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
-            trust_remote_code=True,
+            trust_remote_code=self.trust_remote_code,
             token=token
         )
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         model_kwargs: Dict[str, Any] = {
-            "trust_remote_code": True,
+            "trust_remote_code": self.trust_remote_code,
             "device_map": resolved_map,
             "attn_implementation": self.attn_implementation or rec_attn,
         }
